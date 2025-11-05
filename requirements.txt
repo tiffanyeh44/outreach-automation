@@ -1,0 +1,24 @@
+# Core API and automation
+requests
+playwright
+python-dotenv
+pyperclip
+
+# Gmail API libraries
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+
+# Optional for better debugging/logging
+rich
+tqdm
+
+# If using CSV or Pandas utilities
+pandas
+
+# If FastAPI/Flask backend endpoints will be added later
+fastapi
+uvicorn
+
+# For testing / development
+pytest
