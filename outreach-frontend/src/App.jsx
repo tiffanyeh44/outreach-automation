@@ -104,7 +104,7 @@ function App() {
       </div>
 
       <footer className="mt-8 text-gray-500 text-sm">
-        Built by <span className="font-semibold">CarbonSustain Outreach</span>
+        Built by <span className="font-semibold">CarbonSustain</span>
       </footer>
     </div>
   );
