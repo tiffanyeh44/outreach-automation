@@ -1,7 +1,7 @@
 # outreach/api_client.py
 import requests
 from urllib.parse import urljoin
-from .config import BASE_URL, API_TOKEN
+from config import BASE_URL, API_TOKEN
 
 HEADERS = lambda: ({"Authorization": f"Bearer {API_TOKEN}"} if API_TOKEN else {})
 

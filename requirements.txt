@@ -1,24 +1,35 @@
 # Core API and automation
 requests
-playwright
 python-dotenv
-pyperclip
 
 # Gmail API libraries
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
 
-# Optional for better debugging/logging
-rich
-tqdm
 
-# If using CSV or Pandas utilities
-pandas
+# FastAPI and server
+fastapi==0.104.1
+uvicorn==0.24.0
 
-# If FastAPI/Flask backend endpoints will be added later
-fastapi
-uvicorn
+# Environment and config
+python-dotenv==1.0.0
+
+# HTTP requests
+requests==2.31.0
+
+# Gmail API
+google-auth==2.23.4
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.1
+google-api-python-client==2.108.0
+
+# LinkedIn automation
+playwright==1.40.0
+pyperclip==1.8.2
+
+# Optional but recommended
+pydantic==2.5.0
 
 # For testing / development
 pytest

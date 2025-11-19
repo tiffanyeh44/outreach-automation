@@ -32,4 +32,6 @@ venv/
 
 # Storage folders (contain sensitive data like OAuth tokens)
 .storage/
-
+.storage
+credentials.json
+token.json
