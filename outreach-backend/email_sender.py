@@ -1,371 +1,299 @@
 #!/usr/bin/env python3
 """
-Gmail API Email Sender
-Sends HTML emails using Gmail API 
+Email sender module for outreach campaigns.
+Sends HTML emails using Gmail API and logs each send to the API.
 """
 import os
-import base64
 import time
 import random
+import base64
 from email.mime.text import MIMEText
-from typing import Optional
-from api_client import get_campaign_email_content
-
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+from email.mime.multipart import MIMEMultipart
 from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
 
 from config import (
+    GMAIL_CREDENTIALS_PATH,
     GMAIL_TOKEN_PATH,
-    GMAIL_CREDENTIALS_PATH, 
     GMAIL_SCOPES,
     SENDER_EMAIL,
-    TEST_EMAIL,
     SEND_MIN_DELAY_MS,
-    SEND_MAX_DELAY_MS,
-    EMAIL_METHOD,
-    CAMPAIGN_ID
-)
-from api_client import (
-    get_campaign,
-    get_campaign_email_content,
-    get_campaign_contacts,
-    get_contact
+    SEND_MAX_DELAY_MS
 )
 
-def render_email(campaign_id: int, contact: dict) -> tuple[str, str]:
-    subject, html_body = get_campaign_email_content(campaign_id)
-    first = contact.get("first_name") or "there"
-    return subject, html_body.replace("{{first_name}}", first)
+import api_client
 
-def _load_gmail_credentials() -> Credentials:
+
+class EmailSender:
     """
-    Load Gmail API credentials from token.json.
-    Automatically refreshes expired tokens if refresh_token is available.
+    Handles email sending via Gmail API.
+    Manages authentication, personalization, and delivery tracking.
     """
-    # Get absolute paths
-    script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    if not os.path.isabs(GMAIL_TOKEN_PATH):
-        token_path = os.path.join(script_dir, GMAIL_TOKEN_PATH)
-    else:
-        token_path = GMAIL_TOKEN_PATH
-    
-    if not os.path.isabs(GMAIL_CREDENTIALS_PATH):
-        creds_path = os.path.join(script_dir, GMAIL_CREDENTIALS_PATH)
-    else:
-        creds_path = GMAIL_CREDENTIALS_PATH
-    
-    creds = None
-    
-    # Load existing token if it exists
-    if os.path.exists(token_path):
-        try:
-            creds = Credentials.from_authorized_user_file(token_path, GMAIL_SCOPES)
-            print(f"[INFO] Loaded token from {token_path}")
-        except Exception as e:
-            print(f"[WARN] Failed to load token: {e}")
-            creds = None
-    
-    # If no valid credentials, try to refresh or get new ones
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                print("[INFO] Token expired, refreshing...")
+    def __init__(
+        self,
+        credentials_path: str = GMAIL_CREDENTIALS_PATH,
+        token_path: str = GMAIL_TOKEN_PATH,
+        scopes: list = None,
+        sender_email: str = SENDER_EMAIL,
+        send_min_delay_ms: int = SEND_MIN_DELAY_MS,
+        send_max_delay_ms: int = SEND_MAX_DELAY_MS
+    ):
+        self.credentials_path = credentials_path
+        self.token_path = token_path
+        self.scopes = scopes or GMAIL_SCOPES
+        self.sender_email = sender_email
+        self.send_min_delay_ms = send_min_delay_ms
+        self.send_max_delay_ms = send_max_delay_ms
+        self._service = None
+
+    # ----------------- Private Helper Methods -----------------
+
+    def _sleep_jitter(self):
+        """Sleep for a random duration between configured min/max delay."""
+        delay_ms = random.randint(self.send_min_delay_ms, self.send_max_delay_ms)
+        time.sleep(delay_ms / 1000.0)
+
+    def _get_gmail_service(self):
+        """Authenticate and return Gmail API service (cached)."""
+        if self._service:
+            return self._service
+        
+        creds = None
+        
+        # Check if token.json exists (saved credentials)
+        if os.path.exists(self.token_path):
+            creds = Credentials.from_authorized_user_file(self.token_path, self.scopes)
+        
+        # If no valid credentials, let user log in
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                print("[INFO] Refreshing expired Gmail credentials...")
                 creds.refresh(Request())
-                # Save refreshed token
-                os.makedirs(os.path.dirname(token_path) or ".", exist_ok=True)
-                with open(token_path, 'w') as token:
-                    token.write(creds.to_json())
-                print("[SUCCESS] Token refreshed and saved")
-            except Exception as e:
-                print(f"[WARN] Failed to refresh token: {e}")
-                creds = None
-        
-        # If still no credentials, start OAuth flow
-        if not creds:
-            if not os.path.exists(creds_path):
-                raise FileNotFoundError(
-                    f"credentials.json not found at {creds_path}.\n"
-                    f"Please run: python setup_gmail_oauth.py"
+            else:
+                print("[INFO] No valid Gmail credentials found. Starting OAuth flow...")
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    self.credentials_path, self.scopes
                 )
+                creds = flow.run_local_server(port=0)
             
-            print("[INFO] No valid token found. Starting OAuth flow...")
-            print("[INFO] A browser window will open for Gmail authentication...")
-            flow = InstalledAppFlow.from_client_secrets_file(creds_path, GMAIL_SCOPES)
-            creds = flow.run_local_server(port=0)
-            
-            # Save the token for future use
-            os.makedirs(os.path.dirname(token_path) or ".", exist_ok=True)
-            with open(token_path, 'w') as token:
+            # Save credentials for future use
+            with open(self.token_path, 'w') as token:
                 token.write(creds.to_json())
-            print(f"[SUCCESS] Token saved to {token_path}")
-    
-    return creds
-
-
-def send_gmail_html(to_email: str, subject: str, html_body: str, sender: Optional[str] = None) -> bool:
-    """
-    Send HTML email via Gmail API.
-    
-    Args:
-        to_email: Recipient email address
-        subject: Email subject
-        html_body: HTML email body
-        sender: Sender email (optional, uses SENDER_EMAIL from config or Gmail account)
-    
-    Returns:
-        True if sent successfully, False otherwise
-    """
-    try:
-        creds = _load_gmail_credentials()
-        service = build("gmail", "v1", credentials=creds)
-
-        # Create HTML email
-        msg = MIMEText(html_body, "html")
-        msg["To"] = to_email
-        msg["From"] = sender or SENDER_EMAIL or "me"
-        msg["Subject"] = subject
-
-        # Encode and send
-        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-        result = service.users().messages().send(
-            userId="me", 
-            body={"raw": raw}
-        ).execute()
+            print(f"[INFO] Gmail credentials saved to {self.token_path}")
         
-        message_id = result.get("id")
-        print(f"[SUCCESS] ✓ Sent email to {to_email} (Message ID: {message_id})")
-        return True
-        
-    except HttpError as e:
-        error_msg = str(e)
-        print(f"[ERROR] Gmail API error for {to_email}: {error_msg}")
-        
-        # Provide helpful error messages
-        if e.resp.status == 403:
-            print("[ERROR] Permission denied. Check:")
-            print("  1. Gmail API is enabled in Google Cloud Console")
-            print("  2. OAuth scopes include 'gmail.send'")
-            print("  3. Your account has permission to send emails")
-        elif e.resp.status == 401:
-            print("[ERROR] Authentication failed. Token may be invalid.")
-            print("[INFO] Try running: python setup_gmail_oauth.py")
-        elif e.resp.status == 400:
-            print("[ERROR] Bad request. Check email addresses and message format")
-        
-        return False
-        
-    except FileNotFoundError as e:
-        print(f"[ERROR] {e}")
-        return False
-        
-    except Exception as e:
-        print(f"[ERROR] Unexpected error sending email: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+        self._service = build('gmail', 'v1', credentials=creds)
+        return self._service
 
-
-def _sleep_jitter():
-    """Sleep a random time between SEND_MIN_DELAY_MS and SEND_MAX_DELAY_MS."""
-    ms = random.randint(SEND_MIN_DELAY_MS, SEND_MAX_DELAY_MS)
-    time.sleep(ms / 1000.0)
-
-
-def run_campaign_emails(campaign_id: int, contact_method: int = EMAIL_METHOD) -> int:
-    """
-    Send HTML emails for a campaign using Gmail API.
-    
-    Args:
-        campaign_id: Campaign ID to send emails for
-        contact_method: Contact method ID (defaults to EMAIL_METHOD from config)
-    
-    Returns:
-        Number of emails successfully sent
-    """
-    print("=" * 60)
-    print(f"Starting Email Campaign {campaign_id}")
-    print("=" * 60)
-    
-    # Get campaign details
-    try:
-        campaign = get_campaign(campaign_id)
-        print(f"Campaign: {campaign.get('name')}")
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch campaign: {e}")
-        return 0
-    
-    # Get email subject and HTML body from campaign
-    try:
-        subject, html_body = get_campaign_email_content(campaign_id)
-        print(f"Subject: {subject}")
-        print(f"Body length: {len(html_body)} characters")
-    except Exception as e:
-        print(f"[ERROR] Failed to get email content: {e}")
-        return 0
-    
-    # Get contacts for this campaign
-    print(f"\nFetching contacts for campaign {campaign_id}...")
-    contacts = get_campaign_contacts(campaign_id, contact_method)
-    
-    if not contacts:
-        print("[WARN] No contacts found for this campaign/method")
-        return 0
-    
-    print(f"Found {len(contacts)} contacts to email\n")
-    
-    # Send emails
-    sent_count = 0
-    for idx, item in enumerate(contacts, 1):
-        contact_id = item.get("contact") or item.get("contact_id")
-        if not contact_id:
-            print(f"[{idx}/{len(contacts)}] [WARN] Skipping item without contact id")
-            continue
+    def _get_email_from_contact(self, contact: dict) -> str:
+        """Extract email address from contact data."""
+        # Try direct email field first
+        email = contact.get("email")
+        if isinstance(email, str) and "@" in email:
+            return email.strip()
         
-        try:
-            contact = get_contact(contact_id)
-        except Exception as e:
-            print(f"[{idx}/{len(contacts)}] [ERROR] Failed to fetch contact {contact_id}: {e}")
-            continue
-
-        # Get email address from contact
-        to_email = None
-        for key in ("email", "email_address", "primary_email"):
+        # Try other common field names
+        for key in ("email_address", "primary_email", "work_email"):
             val = contact.get(key)
             if isinstance(val, str) and "@" in val:
-                to_email = val.strip()
-                break
+                return val.strip()
         
-        if not to_email:
-            print(f"[{idx}/{len(contacts)}] [WARN] No email for contact {contact_id}, skipping")
-            continue
+        raise ValueError(f"No email address found in contact {contact.get('id')}")
 
-        # Personalize email if needed (replace {{first_name}} placeholder)
-        personalized_body = html_body
+    def _personalize_html(self, html_body: str, contact: dict) -> str:
+        """Personalize HTML email body with contact information."""
+        personalized = html_body
+        
+        # Replace common placeholders
         first_name = contact.get("first_name", "")
+        last_name = contact.get("last_name", "")
+        full_name = f"{first_name} {last_name}".strip()
+        
         if first_name:
-            personalized_body = html_body.replace("{{first_name}}", first_name)
+            personalized = personalized.replace("{{first_name}}", first_name)
+            personalized = personalized.replace("{first_name}", first_name)
         
-        # Use TEST_EMAIL override if set
-        actual_recipient = TEST_EMAIL if TEST_EMAIL else to_email
-        if TEST_EMAIL:
-            print(f"[{idx}/{len(contacts)}] [TEST MODE] Sending to {TEST_EMAIL} (instead of {to_email})")
-        else:
-            print(f"[{idx}/{len(contacts)}] Sending to {to_email}...")
+        if last_name:
+            personalized = personalized.replace("{{last_name}}", last_name)
+            personalized = personalized.replace("{last_name}", last_name)
         
-        # Send the email
-        success = send_gmail_html(actual_recipient, subject, personalized_body)
+        if full_name:
+            personalized = personalized.replace("{{full_name}}", full_name)
+            personalized = personalized.replace("{full_name}", full_name)
         
-        if success:
-            sent_count += 1
+        return personalized
+
+    # ----------------- Core Email Sending -----------------
+
+    def send_email(self, to_email: str, subject: str, html_body: str) -> bool:
+        """
+        Send an HTML email using Gmail API.
         
-        # Add jitter between sends (except for last email)
-        if idx < len(contacts):
-            _sleep_jitter()
-    
-    print("\n" + "=" * 60)
-    print(f"Campaign Complete: {sent_count}/{len(contacts)} emails sent successfully")
-    print("=" * 60)
-    
-    return sent_count
+        Args:
+            to_email: Recipient email address
+            subject: Email subject
+            html_body: HTML email body
+        
+        Returns:
+            True if sent successfully, False otherwise
+        """
+        try:
+            service = self._get_gmail_service()
+            
+            # Create message
+            message = MIMEMultipart('alternative')
+            message['To'] = to_email
+            message['From'] = self.sender_email
+            message['Subject'] = subject
+            
+            # Attach HTML body
+            html_part = MIMEText(html_body, 'html')
+            message.attach(html_part)
+            
+            # Encode and send
+            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+            body = {'raw': raw_message}
+            
+            result = service.users().messages().send(userId='me', body=body).execute()
+            
+            print(f"[SUCCESS] Email sent! Message ID: {result.get('id')}")
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to send email: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    # ----------------- Campaign Methods -----------------
+
+    def send_to_contact(self, contact_id: int, campaign_id: int) -> bool:
+        """
+        Send email to a specific contact.
+        
+        Args:
+            contact_id: Contact ID from API
+            campaign_id: Campaign ID to get email content
+        
+        Returns:
+            True if sent successfully, False otherwise
+        """
+        try:
+            # STEP 1: Check if already contacted
+            print(f"[CHECK] Checking if contact {contact_id} already contacted...")
+            if api_client.check_if_already_contacted(campaign_id, contact_id, "email"):
+                print(f"[SKIP] Contact {contact_id} already has outbound email log. Skipping.")
+                return False
+            
+            # Get contact details from API
+            print(f"[INFO] Fetching contact {contact_id}...")
+            contact = api_client.get_contact(contact_id)
+            
+            # Extract email address
+            to_email = self._get_email_from_contact(contact)
+            print(f"[INFO] Email: {to_email}")
+            
+            # Get campaign email content
+            subject, html_body = api_client.get_campaign_email_content(campaign_id)
+            
+            # Personalize email body
+            personalized_body = self._personalize_html(html_body, contact)
+            
+            # Send email
+            success = self.send_email(to_email, subject, personalized_body)
+            
+            # Log to API if sent successfully
+            if success:
+                try:
+                    api_client.log_contact_outreach(
+                        campaign_id=campaign_id,
+                        contact_id=contact_id,
+                        channel="email",
+                        subject=subject,
+                        body=personalized_body,
+                        sender_email=self.sender_email
+                    )
+                    print(f"[LOG] Successfully logged outreach for contact {contact_id}")
+                except Exception as log_error:
+                    print(f"[WARN] Failed to log outreach: {log_error}")
+            
+            return success
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to send to contact {contact_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def run_campaign(self, campaign_id: int, contact_ids: list) -> int:
+        """
+        Run email campaign for multiple contacts.
+        
+        Args:
+            campaign_id: Campaign ID
+            contact_ids: List of contact IDs to email
+        
+        Returns:
+            Number of emails successfully sent
+        """
+        print("=" * 60)
+        print(f"Starting Email Campaign {campaign_id}")
+        print(f"Contacts to email: {len(contact_ids)}")
+        print("=" * 60)
+        
+        # Get campaign details
+        try:
+            campaign = api_client.get_campaign(campaign_id)
+            print(f"Campaign: {campaign.get('name')}")
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch campaign: {e}")
+            return 0
+        
+        # Get email subject and HTML body from campaign
+        try:
+            subject, html_body = api_client.get_campaign_email_content(campaign_id)
+            print(f"Subject: {subject}")
+            print(f"Body length: {len(html_body)} characters")
+        except Exception as e:
+            print(f"[ERROR] Failed to get email content: {e}")
+            return 0
+        
+        print(f"\nSending to {len(contact_ids)} contacts...\n")
+        
+        # Send emails to contacts
+        sent_count = 0
+        for idx, contact_id in enumerate(contact_ids, 1):
+            print(f"[{idx}/{len(contact_ids)}] Processing contact {contact_id}...")
+            
+            success = self.send_to_contact(contact_id, campaign_id)
+            if success:
+                sent_count += 1
+            
+            # Add jitter between sends (except for last email)
+            if idx < len(contact_ids):
+                self._sleep_jitter()
+        
+        print("\n" + "=" * 60)
+        print(f"Campaign Complete: {sent_count}/{len(contact_ids)} emails sent successfully")
+        print("=" * 60)
+        
+        return sent_count
 
 
-def test_send():
-    """Send a test email to TEST_EMAIL."""
-    if not TEST_EMAIL:
-        print("[ERROR] TEST_EMAIL not set in .env file")
-        print("Please set TEST_EMAIL=your-email@example.com in your .env file")
-        return False
-    
-    print(f"[INFO] Sending test email to {TEST_EMAIL}...")
-    
-    subject = "Gmail API HTML Test"
-    html_body = """
-    <html>
-        <body>
-            <h1>Hello from Gmail API!</h1>
-            <p>This is a <b>test email</b> with <i>HTML formatting</i>.</p>
-            <ul>
-                <li>Gmail API works! ✓</li>
-                <li>HTML emails work! ✓</li>
-                <li>Ready for campaigns! ✓</li>
-            </ul>
-            <p>Best regards,<br>Your Email Automation</p>
-        </body>
-    </html>
+# For backward compatibility - keep old function name
+def run_campaign_emails_for_contacts(campaign_id: int, contact_ids: list, contact_method: int = 2) -> int:
     """
-    
-    return send_gmail_html(TEST_EMAIL, subject, html_body)
+    Backward compatibility wrapper for existing code.
+    """
+    sender = EmailSender()
+    return sender.run_campaign(campaign_id, contact_ids)
 
 
-def setup_oauth():
-    """Run OAuth flow to generate token.json - only needed once!"""
-    print("=" * 60)
-    print("Gmail OAuth Setup")
-    print("=" * 60)
-    
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    creds_path = os.path.join(script_dir, GMAIL_CREDENTIALS_PATH)
-    token_path = os.path.join(script_dir, GMAIL_TOKEN_PATH)
-    
-    if not os.path.exists(creds_path):
-        print(f"[ERROR] credentials.json not found at: {creds_path}")
-        print("\nPlease create credentials.json with your OAuth client credentials")
-        print("from Google Cloud Console")
-        return False
-    
-    print(f"[INFO] Using credentials from: {creds_path}")
-    print("[INFO] Starting OAuth flow...")
-    print("[INFO] A browser window will open for Gmail authentication\n")
-    
-    try:
-        flow = InstalledAppFlow.from_client_secrets_file(creds_path, GMAIL_SCOPES)
-        creds = flow.run_local_server(port=0)
-        
-        # Save the token
-        os.makedirs(os.path.dirname(token_path) or ".", exist_ok=True)
-        with open(token_path, 'w') as token:
-            token.write(creds.to_json())
-        
-        print(f"\n[SUCCESS] ✓ Token saved to: {token_path}")
-        print("[SUCCESS] ✓ Gmail OAuth setup completed!")
-        print("\nYou can now send emails using: python email_sender.py test")
-        return True
-        
-    except Exception as e:
-        print(f"\n[ERROR] OAuth flow failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-
+# For testing
 if __name__ == "__main__":
-    import sys
-    
-    # Check command line arguments
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "setup":
-            # Setup OAuth
-            setup_oauth()
-        elif sys.argv[1] == "test":
-            # Test mode: send test email
-            test_send()
-        elif sys.argv[1].isdigit():
-            # Campaign mode: send campaign emails
-            campaign_id = int(sys.argv[1])
-            run_campaign_emails(campaign_id)
-        else:
-            print("Usage:")
-            print("  python email_sender.py setup         # Setup Gmail OAuth (first time)")
-            print("  python email_sender.py test          # Send test email")
-            print("  python email_sender.py <campaign_id> # Run campaign")
-    else:
-        # Default: use CAMPAIGN_ID from config
-        if TEST_EMAIL:
-            print(f"[INFO] TEST_EMAIL is set: {TEST_EMAIL}")
-            print("[INFO] All emails will be sent to this address for testing")
-        
-        run_campaign_emails(CAMPAIGN_ID)
+    sender = EmailSender()
+    print("[TEST] Email sender module loaded successfully")
+    print(f"[TEST] Sender email: {sender.sender_email}")
+    print(f"[TEST] Credentials path: {sender.credentials_path}")

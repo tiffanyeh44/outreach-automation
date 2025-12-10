@@ -1,14 +1,17 @@
 import { useState, useEffect } from "react";
-import "./index.css";
 
 function App() {
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
-  const [sendingCampaigns, setSendingCampaigns] = useState({}); // Track which campaigns are sending
-  const [selectedMethods, setSelectedMethods] = useState({}); // Track selected method per campaign
+  const [sendingCampaigns, setSendingCampaigns] = useState({});
+  const [selectedMethods, setSelectedMethods] = useState({});
+  const [campaignContacts, setCampaignContacts] = useState({});
+  const [selectedContacts, setSelectedContacts] = useState({});
+  const [loadingContacts, setLoadingContacts] = useState({});
 
-  // Fetch campaigns on mount
+  const BACKEND_URL = "http://127.0.0.1:8000";
+
   useEffect(() => {
     fetchCampaigns();
   }, []);
@@ -16,25 +19,25 @@ function App() {
   const fetchCampaigns = async () => {
     try {
       setLoading(true);
-      console.log("[DEBUG] Fetching campaigns from: http://127.0.0.1:8000/campaigns");
+      console.log("[DEBUG] Fetching campaigns from backend");
       
-      const response = await fetch("http://127.0.0.1:8000/campaigns");
+      const response = await fetch(`${BACKEND_URL}/campaigns`);
       
       if (!response.ok) {
         const errorText = await response.text();
         console.error("[ERROR] Response not OK:", response.status, errorText);
-        throw new Error(`Failed to fetch campaigns: ${response.status} - ${errorText}`);
+        throw new Error(`Failed to fetch campaigns: ${response.status}`);
       }
       
       const data = await response.json();
-      console.log("[DEBUG] Received data:", data);
+      console.log("[DEBUG] Received campaigns:", data);
       
       setCampaigns(data.campaigns || []);
       
       // Initialize selected methods (default to email)
       const initialMethods = {};
       (data.campaigns || []).forEach(campaign => {
-        initialMethods[campaign.id] = "2"; // Default to email
+        initialMethods[campaign.id] = "email"; // Changed to string!
       });
       setSelectedMethods(initialMethods);
       
@@ -48,40 +51,104 @@ function App() {
   };
 
   const handleMethodChange = (campaignId, method) => {
+    console.log(`[DEBUG] Method changed for campaign ${campaignId}: ${method}`);
     setSelectedMethods(prev => ({
       ...prev,
       [campaignId]: method
     }));
+    
+    // Load contacts for this campaign and method
+    fetchContactsForCampaign(campaignId, method);
+  };
+
+  const fetchContactsForCampaign = async (campaignId, contactMethod) => {
+    try {
+      setLoadingContacts(prev => ({ ...prev, [campaignId]: true }));
+      
+      console.log(`[DEBUG] Fetching contacts for campaign ${campaignId}, method ${contactMethod}`);
+      
+      // Call backend which will call DigitalOcean API
+      const response = await fetch(
+        `${BACKEND_URL}/campaigns/${campaignId}/contacts?contact_method=${contactMethod}`
+      );
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch contacts: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log(`[DEBUG] Received ${data.contacts.length} contacts:`, data);
+      
+      setCampaignContacts(prev => ({
+        ...prev,
+        [campaignId]: data.contacts
+      }));
+      
+      // Set default to "all" contacts
+      setSelectedContacts(prev => ({
+        ...prev,
+        [campaignId]: "all"
+      }));
+      
+    } catch (err) {
+      console.error(`[ERROR] Failed to fetch contacts for campaign ${campaignId}:`, err);
+      setStatus(`❌ Error loading contacts: ${err.message}`);
+    } finally {
+      setLoadingContacts(prev => ({ ...prev, [campaignId]: false }));
+    }
+  };
+
+  const handleContactChange = (campaignId, value) => {
+    console.log(`[DEBUG] Contact selected for campaign ${campaignId}: ${value}`);
+    setSelectedContacts(prev => ({
+      ...prev,
+      [campaignId]: value
+    }));
   };
 
   const sendCampaign = async (campaignId) => {
-    const contactMethod = selectedMethods[campaignId] || "2";
+    const contactMethod = selectedMethods[campaignId] || "email"; // String, not number!
+    const selectedContactValue = selectedContacts[campaignId] || "all";
     
-    // Mark this campaign as sending
+    let contact_ids = [];
+    
+    if (selectedContactValue !== "all") {
+      contact_ids = [parseInt(selectedContactValue)];
+    }
+    
     setSendingCampaigns(prev => ({ ...prev, [campaignId]: true }));
     setStatus(`Sending campaign ${campaignId}... please wait ⏳`);
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/run_campaign", {
+      console.log("[DEBUG] Sending campaign:", {
+        campaign_id: campaignId,
+        contact_method: contactMethod, // String: "email" or "linkedin"
+        contact_ids: contact_ids
+      });
+      
+      const response = await fetch(`${BACKEND_URL}/run_campaign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           campaign_id: parseInt(campaignId),
-          contact_method: parseInt(contactMethod),
+          contact_method: contactMethod, // String, not number!
+          contact_ids: contact_ids
         }),
       });
 
       if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
+        const errorText = await response.text();
+        console.error("[ERROR] Response:", errorText);
+        throw new Error(`Server responded with ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
+      console.log("[DEBUG] Success response:", data);
       setStatus(`✅ Success: ${data.message || "Messages sent successfully"}`);
     } catch (err) {
-      console.error(err);
+      console.error("[ERROR] Send campaign failed:", err);
       setStatus(`❌ Error: ${err.message}`);
     } finally {
-      // Mark this campaign as no longer sending
       setSendingCampaigns(prev => {
         const updated = { ...prev };
         delete updated[campaignId];
@@ -164,15 +231,47 @@ function App() {
                     Sending Method
                   </label>
                   <select
-                    value={selectedMethods[campaign.id] || "2"}
+                    value={selectedMethods[campaign.id] || "email"}
                     onChange={(e) => handleMethodChange(campaign.id, e.target.value)}
                     disabled={sendingCampaigns[campaign.id]}
                     className="w-full p-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                   >
-                    <option value="2">Email</option>
-                    <option value="4">LinkedIn</option>
+                    <option value="email">📧 Email (Gmail API)</option>
+                    <option value="linkedin">💼 LinkedIn (Playwright)</option>
                   </select>
                 </div>
+
+                {/* Contact Selector */}
+                {campaignContacts[campaign.id] && (
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Select Contact(s)
+                    </label>
+                    {loadingContacts[campaign.id] ? (
+                      <div className="text-sm text-gray-500 py-2">Loading contacts...</div>
+                    ) : (
+                      <select
+                        value={selectedContacts[campaign.id] || "all"}
+                        onChange={(e) => handleContactChange(campaign.id, e.target.value)}
+                        disabled={sendingCampaigns[campaign.id]}
+                        className="w-full p-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      >
+                        <option value="all">🔮 All Contacts ({campaignContacts[campaign.id].length})</option>
+                        
+                        {campaignContacts[campaign.id].length > 0 ? (
+                          campaignContacts[campaign.id].map(contact => (
+                            <option key={contact.id} value={contact.id}>
+                              {contact.name}
+                              {contact.email && ` (${contact.email})`}
+                            </option>
+                          ))
+                        ) : (
+                          <option disabled>No contacts found</option>
+                        )}
+                      </select>
+                    )}
+                  </div>
+                )}
 
                 {/* Send Button */}
                 <button
