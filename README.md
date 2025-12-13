@@ -138,57 +138,83 @@ npm install
 ```
 
 ---
-
 ## ⚙️ Step 2: Configuration Files
 
 ### 1. Create `.storage/credentials.json` (Gmail OAuth)
 
-Create the directory and file:
+**⚠️ IMPORTANT: Get Your Own Gmail API Credentials**
+
+You need to create your own Gmail API credentials from Google Cloud Console. **DO NOT use credentials from this repository or documentation.**
+
+#### Steps to Get Gmail API Credentials:
+
+1. **Go to [Google Cloud Console](https://console.cloud.google.com/)**
+2. **Create a new project** (or select existing)
+3. **Enable Gmail API**:
+   - Go to "APIs & Services" > "Library"
+   - Search for "Gmail API"
+   - Click "Enable"
+4. **Create OAuth 2.0 Credentials**:
+   - Go to "APIs & Services" > "Credentials"
+   - Click "Create Credentials" > "OAuth client ID"
+   - Choose "Desktop app"
+   - Click "Create"
+5. **Download credentials**:
+   - Click the download icon (⬇️) next to your OAuth client
+   - Save the file
+
+#### Install Your Credentials:
 
 ```bash
 # From outreach-backend directory
 mkdir -p .storage
+
+# Rename the downloaded file and move it
+# The downloaded file will be named something like:
+# client_secret_XXXXX.apps.googleusercontent.com.json
+
+# Rename and move it to:
+mv ~/Downloads/client_secret_*.json .storage/credentials.json
 ```
 
-Create `.storage/credentials.json` with this content:
+The `credentials.json` file should look like this structure (with YOUR values):
 
 ```json
 {
   "installed": {
-    "client_id": "1052426663720-2i31cdaf0cov6ojjfjhfa4irucst7ch5.apps.googleusercontent.com",
-    "project_id": "carbonsustaindev",
+    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    "project_id": "your-project-id",
     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
     "token_uri": "https://oauth2.googleapis.com/token",
     "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    "client_secret": "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",
+    "client_secret": "YOUR_CLIENT_SECRET_HERE",
     "redirect_uris": ["http://localhost"]
   }
 }
+
 ```
 
 ### 2. Create `.env` File
+
+**Request Access from CarbonSustain Team**
+
+Before creating your `.env` file, contact **Paul Bryzek** at [pbryzek@berkeley.edu](mailto:pbryzek@berkeley.edu) to request the **API Base URL** for the DigitalOcean backend.
 
 Create `outreach-backend/.env` with this content:
 
 ```properties
 # API Configuration
-BASE_URL=https://sustainb3tr-zx59d.ondigitalocean.app
+BASE_URL=...
 
 # Gmail API Configuration
 GMAIL_CREDENTIALS_PATH=.storage/credentials.json
 GMAIL_TOKEN_PATH=.storage/token.json
 SENDER_EMAIL=your-email@gmail.com
 
-# Test Configuration  
-TEST_EMAIL=pbryzek@berkeley.edu
-TEST_CAMPAIGN_ID=3
-
 # Timing (milliseconds between emails)
 SEND_MIN_DELAY_MS=1500
 SEND_MAX_DELAY_MS=3500
 ```
-
-**Important:** Replace `your-email@gmail.com` with your actual Gmail address!
 
 ---
 
