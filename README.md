@@ -173,7 +173,6 @@ Create `outreach-backend/.env` with this content:
 ```properties
 # API Configuration
 BASE_URL=https://sustainb3tr-zx59d.ondigitalocean.app
-API_TOKEN=
 
 # Gmail API Configuration
 GMAIL_CREDENTIALS_PATH=.storage/credentials.json
@@ -313,27 +312,6 @@ node_modules/
 
 ---
 
-## 📝 API Endpoints
-
-### Backend (http://127.0.0.1:8000)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/campaigns` | GET | List all campaigns |
-| `/campaigns/{id}/contacts?contact_method={method}` | GET | Get contacts for campaign |
-| `/run_campaign` | POST | Execute campaign send |
-
-### Request Body for `/run_campaign`:
-```json
-{
-  "campaign_id": 3,
-  "contact_method": "email",  // or "linkedin"
-  "contact_ids": [32]  // or [] for all contacts
-}
-```
-
----
-
 ## 🐛 Troubleshooting
 
 ### Backend won't start:
@@ -411,35 +389,5 @@ graph TD
 
 ---
 
-## 🤝 Contributing
 
-1. Create a feature branch
-2. Make your changes
-3. Test thoroughly
-4. Submit a pull request
-
----
-
-## 📄 License
-
-[Your License Here]
-
----
-
-## 👥 Team
-
-Built by **CarbonSustain** team for automated outreach campaigns.
-
----
-
-## 📞 Support
-
-For issues or questions:
-1. Check the troubleshooting section above
-2. Review backend terminal output for error messages
-3. Check browser console (F12) for frontend errors
-4. Contact the development team
-
----
-
-**Happy Outreach! 🚀**
+**Built by Tiffany Yeh.**
