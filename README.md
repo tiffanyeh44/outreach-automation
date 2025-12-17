@@ -1,13 +1,13 @@
 # Outreach Automation Dashboard
 
-A full-stack automation tool for managing and executing email and LinkedIn outreach campaigns. The system fetches campaigns and contacts from a DigitalOcean API, allows users to select sending methods (Email via Gmail API or LinkedIn via Playwright), and automatically logs all outreach activities.
+This is full-stack automation tool for managing and executing email and LinkedIn outreach campaigns. The system fetches campaigns and contacts from a DigitalOcean API, allows users to select sending methods (Email via Gmail API or LinkedIn via Playwright), and automatically logs all outreach activities.
 
 ## 🎯 What This Project Does
 
 - **Campaign Management**: View all available outreach campaigns from your CRM
 - **Multi-Channel Outreach**: Send messages via:
-  - 📧 **Email** using Gmail API (automated, no browser needed)
-  - 💼 **LinkedIn** using Playwright (browser automation)
+  - **Email** using Gmail API (automated, no browser needed)
+  - **LinkedIn** using Playwright (browser automation)
 - **Contact Selection**: Choose specific contacts or send to all contacts in a campaign
 - **Outreach Tracking**: Automatically logs all sent messages to prevent duplicate outreach
 - **Smart Filtering**: Checks if contacts have already been contacted before sending
