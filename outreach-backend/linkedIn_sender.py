@@ -76,16 +76,34 @@ class LinkedInSender:
             print(f"[DEBUG] Login check error: {e}")
             return False
 
-    def _wait_for_login(self, page, max_wait_seconds: int = 600) -> bool:
-        """Wait for user to manually log in to LinkedIn."""
-        print("\n[LOGIN] Please log in manually in the opened browser window.")
-        print(f"[LOGIN] You have {max_wait_seconds // 60} minutes to complete login (2FA, verification, etc.)")
+    def _wait_for_login(self, page, max_wait_seconds: int = 1800) -> bool:
+        """
+        Wait for user to manually log in to LinkedIn.
+        
+        Args:
+            page: Playwright page object
+            max_wait_seconds: Maximum time to wait in seconds (default: 30 minutes)
+        
+        Returns:
+            bool: True if login detected, False if timeout reached
+        """
+        minutes = max_wait_seconds // 60
+        
+        print("\n" + "="*60)
+        print("[LOGIN] Please log in manually in the opened browser window.")
+        print(f"[LOGIN] You have {minutes} minutes to complete login")
+        print("[LOGIN] (includes time for 2FA, email verification, CAPTCHA, etc.)")
         print("[LOGIN] The script will automatically detect when you're logged in...")
+        print("="*60 + "\n")
 
         start_time = time.time()
-        check_interval = 3  # Check every 3 seconds
+        check_interval = 2  # Check every 2 seconds for faster detection
         last_status_message = 0
-        status_interval = 15  # Print status every 15 seconds
+        status_interval = 20  # Print status every 20 seconds
+        
+        # Track consecutive login checks to avoid false positives
+        consecutive_login_checks = 0
+        required_consecutive_checks = 2
 
         while time.time() - start_time < max_wait_seconds:
             try:
@@ -95,33 +113,73 @@ class LinkedInSender:
 
                 # Check if logged in
                 if self._is_logged_in(page):
-                    print(f"\n[SUCCESS] Login detected after {int(elapsed)} seconds! Proceeding...")
-                    time.sleep(3)  # Let page settle
-                    return True
+                    consecutive_login_checks += 1
+                    
+                    if consecutive_login_checks >= required_consecutive_checks:
+                        elapsed_minutes = int(elapsed // 60)
+                        elapsed_seconds = int(elapsed % 60)
+                        print(f"\n{'='*60}")
+                        print(f"[SUCCESS] ✓ Login detected after {elapsed_minutes}m {elapsed_seconds}s!")
+                        print(f"[SUCCESS] Proceeding with automation...")
+                        print(f"{'='*60}\n")
+                        time.sleep(3)  # Let page settle
+                        return True
+                    else:
+                        # Wait for confirmation
+                        time.sleep(1)
+                        continue
+                else:
+                    consecutive_login_checks = 0
 
-                # Print status periodically
+                # Print status periodically with enhanced feedback
                 if elapsed - last_status_message >= status_interval:
                     minutes_remaining = int(remaining // 60)
                     seconds_remaining = int(remaining % 60)
-
-                    if "login" in current_url.lower() or "challenge" in current_url.lower():
-                        print(f"[LOGIN] Still waiting for login... ({minutes_remaining}m {seconds_remaining}s remaining)")
-                    elif "linkedin.com/in/" in current_url.lower():
-                        print(f"[LOGIN] On profile page, checking login status... ({minutes_remaining}m {seconds_remaining}s remaining)")
-                    else:
-                        print(f"[LOGIN] Monitoring login status... ({minutes_remaining}m {seconds_remaining}s remaining)")
-
+                    elapsed_display = f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
+                    
+                    status_msg = self._get_status_message(
+                        current_url, 
+                        minutes_remaining, 
+                        seconds_remaining,
+                        elapsed_display
+                    )
+                    print(status_msg)
                     last_status_message = elapsed
 
                 time.sleep(check_interval)
+                
             except Exception as e:
                 print(f"[DEBUG] Error checking login status: {e}")
                 time.sleep(check_interval)
 
+        # Timeout reached
         elapsed_total = int(time.time() - start_time)
-        print(f"\n[WARN] Login wait timeout reached after {elapsed_total // 60} minutes.")
-        print("[WARN] Proceeding anyway - please ensure you are logged in...")
+        print(f"\n{'='*60}")
+        print(f"[TIMEOUT] Login wait timeout reached after {elapsed_total // 60} minutes.")
+        print(f"[TIMEOUT] Please ensure you are logged in before proceeding.")
+        print(f"[TIMEOUT] You may need to restart the script if login failed.")
+        print(f"{'='*60}\n")
         return False
+
+    def _get_status_message(self, current_url: str, minutes_remaining: int, 
+                           seconds_remaining: int, elapsed_display: str) -> str:
+        """Generate appropriate status message based on current URL."""
+        time_remaining = f"({minutes_remaining}m {seconds_remaining}s remaining)"
+        
+        url_lower = current_url.lower()
+        
+        if "login" in url_lower:
+            return f"[LOGIN] ⏳ Waiting on login page... {time_remaining} | Elapsed: {elapsed_display}"
+        elif "challenge" in url_lower or "checkpoint" in url_lower:
+            return f"[LOGIN] 🔐 Detected security challenge... {time_remaining} | Elapsed: {elapsed_display}"
+        elif "verification" in url_lower or "verify" in url_lower:
+            return f"[LOGIN] ✉️  Waiting for email/phone verification... {time_remaining} | Elapsed: {elapsed_display}"
+        elif "linkedin.com/feed" in url_lower:
+            return f"[LOGIN] 📊 On feed page, verifying login... {time_remaining} | Elapsed: {elapsed_display}"
+        elif "linkedin.com/in/" in url_lower:
+            return f"[LOGIN] 👤 On profile page, checking login... {time_remaining} | Elapsed: {elapsed_display}"
+        else:
+            return f"[LOGIN] 🔍 Monitoring login status... {time_remaining} | Elapsed: {elapsed_display}"
 
     def _extract_first_name_from_url(self, profile_url: str) -> str:
         """Extract first name from LinkedIn profile URL."""
