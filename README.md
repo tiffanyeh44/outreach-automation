@@ -259,7 +259,7 @@ python main.py
 
 You should see:
 ```
-INFO:     Uvicorn running on http://127.0.0.1:8000
+INFO:     Uvicorn running on http://127.0.0.1:8001
 ```
 
 ### Terminal 2: Start Frontend
@@ -342,13 +342,13 @@ node_modules/
 
 ### Backend won't start:
 ```bash
-# Check if port 8000 is in use
+# Check if port 8001 is in use
 # macOS/Linux:
-lsof -i :8000
+lsof -i :8001
 kill -9 <PID>
 
 # Windows:
-netstat -ano | findstr :8000
+netstat -ano | findstr :8001
 taskkill /PID <PID> /F
 ```
 
